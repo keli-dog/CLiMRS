@@ -1,6 +1,7 @@
 
 import copy
 import openai
+import re
 
 import json
 from openai import OpenAIError, OpenAI
@@ -12,6 +13,15 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from llm_utils.llm_module import Agent, API_KEY_R17B, API_KEY_CLIMRS, API_URL, API_URL_R17B, MODEL_SELECTION
 
 from types import SimpleNamespace
+
+
+def strip_think_tags(text):
+	"""MiniMax-M3 等模型会输出 <think>...</think>，需去掉再解析 Hello 指令。"""
+	if not text:
+		return text
+	text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)
+	text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)
+	return text.strip()
 
 
 class LLM:
@@ -77,7 +87,7 @@ class LLM:
 								with open(f"./chat_raw.json", 'a') as f:
 									f.write(json.dumps(response, indent=4))
 									f.write('\n')
-							generated_samples = [response.choices[i].message.content for i in
+							generated_samples = [strip_think_tags(response.choices[i].message.content) for i in
                                                     range(sampling_params['n'])]
 							if 'gpt-4-0125-preview' in self.lm_id:
 								usage = response.usage.prompt_tokens * 0.01 / 1000 + response.usage.completion_tokens * 0.03 / 1000
@@ -93,7 +103,7 @@ class LLM:
 				elif source == 'llm_module':
 					try:
 						if self.chat:
-							prompt.insert(0,{"role":"system", "content":"You are a helper assistant."})
+							prompt.insert(0,{"role":"system", "content":"You are a helper assistant. Never wrap the answer in <think> tags. Always put the required Hello <agent>(id): instruction first."})
 							response = client.respond_once_all_args(
                                 messages=prompt, **sampling_params
                             )
@@ -102,7 +112,7 @@ class LLM:
 								with open(f"./chat_raw.json", 'a') as f:
 									f.write(json.dumps(response, indent=4))
 									f.write('\n')
-							generated_samples = [response['choices'][i]['message']['content'] for i in range(sampling_params['n'])]
+							generated_samples = [strip_think_tags(response['choices'][i]['message']['content']) for i in range(sampling_params['n'])]
 							if 'gpt-4-0125-preview' in self.lm_id or 'gpt-4o-2024-11-20' in self.lm_id:
 								usage = response['usage']['prompt_tokens'] * 0.01 / 1000 + response['usage']['completion_tokens'] * 0.03 / 1000
 							elif 'gpt-3.5-turbo-1106' in self.lm_id:

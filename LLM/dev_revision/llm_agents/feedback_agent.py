@@ -10,7 +10,61 @@ import openai
 from openai import OpenAIError, OpenAI
 from types import SimpleNamespace
 
-from llm_utils.llm_module import Agent, API_KEY_R17B, API_KEY_CLIMRS, API_URL, API_URL_R17B, MODEL_SELECTION
+from llm_utils.llm_module import Agent, API_KEY_R17B, API_KEY_CLIMRS, API_URL, API_URL_R17B, MODEL_SELECTION, strip_think_tags
+
+
+def _normalize_agent_cot(output):
+	"""Strip <think> and ensure MiniMax answers can pass the YES I CAN gate."""
+	output = strip_think_tags(output or "")
+	upper = output.upper().strip()
+	if upper.startswith("YES I CAN") or upper.startswith("SORRY I CANNOT"):
+		return output
+	skill_hints = ("[MOVE]", "[PUSH]", "[WAIT]", "[WALK]", "[CARRY]", "[CHECK]", "[PICK]", "[OBSERVE]", "OPTION ")
+	if any(s in upper for s in skill_hints) or not upper:
+		# Empty after strip, or already discusses a skill → accept and continue to action selection
+		return ("YES I CAN. " + output).strip()
+	return output
+
+
+def _decision_prefix(output):
+	output = _normalize_agent_cot(output)
+	upper = output.upper().lstrip()
+	if upper.startswith("YES I CAN"):
+		return "YES I CAN", output
+	if upper.startswith("SORRY I CANNOT"):
+		return "SORRY I CANNOT", output
+	first = upper.split(".")[0].strip() if upper else ""
+	return first, output
+
+
+def _parse_available_action(available_actions, text):
+	"""Match LLM text to an available action; tolerant of MiniMax / underscore issues."""
+	text = strip_think_tags(text or "")
+	text_space = text.replace("_", " ")
+	for action in available_actions:
+		if action in text or action.replace("_", " ") in text_space:
+			return action
+	text_l = text.lower()
+	skill_hits = []
+	for action in available_actions:
+		m = re.match(r'(\[[^\]]+\])', action.strip(), re.I)
+		if m and m.group(1).lower() in text_l:
+			skill_hits.append(action)
+	if len(skill_hits) == 1:
+		return skill_hits[0]
+	if len(skill_hits) > 1:
+		for action in skill_hits:
+			ids = re.findall(r'\((\d+)\)', action)
+			if ids and ids[0] in text:
+				return action
+		return skill_hits[0]
+	for i, action in enumerate(available_actions):
+		option = chr(ord('A') + i)
+		tokens = text_space.split(' ')
+		if any(opt in text for opt in [f"option {option}", f"Option {option}", f"({option})"]) or f"{option}." in tokens or f"{option}," in tokens:
+			return action
+	return None
+
 
 # inherited from Coherent
 class LLM:
@@ -117,23 +171,10 @@ class LLM:
 
 	def parse_answer(self, available_actions, text):
 		
-		text = text.replace("_", " ")
-		text = text.replace("takeoff from", "takeoff_from")
-		text = text.replace("land on", "land_on")
-
-		for i in range(len(available_actions)):
-			action = available_actions[i]
-			if action in text:
-				return action
-		self.write_log_to_file('\nThe first action parsing failed!!!')
-
-		for i in range(len(available_actions)):
-			action = available_actions[i]
-			option = chr(ord('A') + i)
-			if f"option {option}" in text or f"{option}." in text.split(' ') or f"{option}," in text.split(' ') or f"Option {option}" in text or f"({option})" in text:
-				return action
-		self.write_log_to_file('\nThe second action parsing failed!!!')
-
+		plan = _parse_available_action(available_actions, text)
+		if plan is not None:
+			return plan
+		self.write_log_to_file('\nThe first/second action parsing failed!!!')
 		print("WARNING! No available action parsed!!! Output plan NONE!\n")
 		return None
 
@@ -316,30 +357,32 @@ class LLM:
 		if self.debug:
 			print(f"cot_output:\n{output}")
 			print(f"total cost: {self.total_cost}")
-		sentences = output.split(".")
-		first_sentence = sentences[0].upper()
+		first_sentence, output = _decision_prefix(output)
 		print("#" *20)
 		print("the first sentence is", first_sentence)
 		print("#" *20)
 
+		message = ""
 		if first_sentence == "YES I CAN":
 			chat_prompt = [{"role": "user", "content": agent_prompt},
 							{"role": "assistant", "content": output},
-							{"role": "user", "content": "Answer with only one best next action in the list of available actions. So the answer is"}]
+							{"role": "user", "content": "Answer with only one best next action in the list of available actions. Start with the action string that begins with [skill]. So the answer is"}]
 
 			outputs, usage = self.generator(chat_prompt, self.sampling_params)
 			output = outputs[0]
 			self.total_cost += usage
 			self.write_log_to_file(output+'\n2222222222222')
-			sentences = output.split(".")
-			first_sentence = sentences[0].upper()
-			if first_sentence != "SORRY I CANNOT": 
+			first_sentence2, output = _decision_prefix(output)
+			if first_sentence2 != "SORRY I CANNOT": 
 
 				if self.debug:
 					print(f"cot_output:\n{output}")
 					print(f"total cost: {self.total_cost}")
 
 				plan = self.parse_answer(available_plans_list, output)
+				# Fallback: parse skill from the oracle instruction itself
+				if plan is None:
+					plan = self.parse_answer(available_plans_list, chat_agent_info.get('instruction', ''))
 				if plan is None:
 					plan_str = 'no plan'
 				else:
@@ -371,7 +414,7 @@ class LLM:
 
 
 		if first_sentence == "SORRY I CANNOT":
-			output = output[16].lower() + output[17:]
+			output = output[16].lower() + output[17:] if len(output) > 17 else output
 			message = f"Sorry, the current actions I can perform cannot complete this instrcution. Possible reasons would be {output} My current actionlist is: {available_plans}"
 			self.write_log_to_file(message+'\n4444444444444')
 		info['cost'] = self.total_cost	
@@ -811,8 +854,7 @@ class FeedbackAgent:
             print(f"cot_output:\n{output}")
             print(f"total cost: {self.total_cost}")
 
-        sentences = output.split(".")
-        first_sentence = sentences[0].upper()
+        first_sentence, output = _decision_prefix(output)
         print("#" * 20)
         print("the first sentence is", first_sentence)
         print("#" * 20)
@@ -823,7 +865,7 @@ class FeedbackAgent:
             chat_prompt = [
                 {"role": "user", "content": agent_prompt},
                 {"role": "assistant", "content": output},
-                {"role": "user", "content": "Answer with only one best next action in the list of available actions. So the answer is"}
+                {"role": "user", "content": "Answer with only one best next action in the list of available actions. Start with the action string that begins with [skill]. So the answer is"}
             ]
 
             outputs, usage = self._generate(chat_prompt, self.sampling_params)
@@ -831,14 +873,15 @@ class FeedbackAgent:
             self.total_cost += usage
             self.write_log_to_file(output + '\n2222222222222')
 
-            sentences = output.split(".")
-            first_sentence = sentences[0].upper()
-            if first_sentence != "SORRY I CANNOT":
+            first_sentence2, output = _decision_prefix(output)
+            if first_sentence2 != "SORRY I CANNOT":
                 if self.debug:
                     print(f"cot_output:\n{output}")
                     print(f"total cost: {self.total_cost}")
 
                 plan = self.parse_answer(available_plans_list, output)
+                if plan is None:
+                    plan = self.parse_answer(available_plans_list, chat_agent_info.get('instruction', ''))
                 plan_str = plan if plan is not None else 'no plan'
                 print(plan)
                 
@@ -907,23 +950,10 @@ class FeedbackAgent:
 
     def parse_answer(self, available_actions, text):
         """Parse the LLM's answer to get the chosen action"""
-        text = text.replace("_", " ")
-        text = text.replace("takeoff from", "takeoff_from")
-        text = text.replace("land on", "land_on")
-
-        # Try direct action match
-        for action in available_actions:
-            if action in text:
-                return action
-        self.write_log_to_file('\nThe first action parsing failed!!!')
-
-        # Try option letter match
-        for i, action in enumerate(available_actions):
-            option = chr(ord('A') + i)
-            if any(opt in text for opt in [f"option {option}", f"{option}.", f"{option},", f"Option {option}", f"({option})"]):
-                return action
-        self.write_log_to_file('\nThe second action parsing failed!!!')
-
+        plan = _parse_available_action(available_actions, text)
+        if plan is not None:
+            return plan
+        self.write_log_to_file('\nThe first/second action parsing failed!!!')
         print("WARNING! No available action parsed!!! Output plan NONE!\n")
         return None
 

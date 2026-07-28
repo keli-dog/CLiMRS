@@ -1,9 +1,19 @@
 import requests
 import json
+import re
 import sys
 from .args import *
 
 MODEL_DEFAULT = "gpt-4o-2024-11-20"
+
+
+def strip_think_tags(text):
+    """Remove MiniMax / reasoning <think>...</think> blocks."""
+    if not text:
+        return text
+    text = re.sub(r'<think>[\s\S]*?</think>', '', text, flags=re.IGNORECASE)
+    return text.strip()
+
 
 class Agent:
     '''
@@ -96,6 +106,14 @@ class Agent:
             print("Empty response body")
         
         response = response.json()
+        # Strip think tags in-place so oracle_planner / feedback_agent all benefit
+        try:
+            for ch in response.get("choices", []):
+                msg = ch.get("message") or {}
+                if "content" in msg and isinstance(msg["content"], str):
+                    msg["content"] = strip_think_tags(msg["content"])
+        except Exception:
+            pass
 
         return response
     
@@ -128,7 +146,7 @@ class Agent:
             response
         ):
         answer = response.get("choices", [])[0].get("message", {}).get("content", "")
-        return answer
+        return strip_think_tags(answer)
 
  
 if __name__ == "__main__":

@@ -4,8 +4,12 @@ from env.tasks.humanoid_view_motion import HumanoidViewMotion
 from env.tasks.vec_task_wrappers import VecTaskPythonWrapper
 
 
-from env.tasks.humanoid_amp_carryobject import HumanoidAMPCarryObject
-from env.tasks.share_humanoid_amp_carryobject import ShareHumanoidCarryObject
+try:
+    from env.tasks.humanoid_amp_carryobject import HumanoidAMPCarryObject
+    from env.tasks.share_humanoid_amp_carryobject import ShareHumanoidCarryObject
+except ModuleNotFoundError:
+    HumanoidAMPCarryObject = None
+    ShareHumanoidCarryObject = None
 from env.tasks.humanoid_amp_carryobject_obstacle import HumanoidAMPCarryObjectObstacle
 
 from isaacgym import rlgpu

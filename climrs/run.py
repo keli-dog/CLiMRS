@@ -1,3 +1,13 @@
+# Isaac Gym must be imported before torch; disable JIT for RTX 4090 + cu111 NVRTC.
+from isaacgym import gymapi
+import torch
+
+def _jit_noop(o=None, **kw):
+    return (lambda f: f) if o is None else o
+
+torch.jit.script = _jit_noop
+torch.cuda.get_device_capability = lambda *a, **k: (8, 6)
+
 import os
 import wandb
 import sys
@@ -12,7 +22,6 @@ from rl_games.torch_runner import Runner
 
 import numpy as np
 import copy
-import torch
 
 from learning import amp_agent
 from learning import amp_players

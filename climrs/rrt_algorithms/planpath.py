@@ -220,19 +220,19 @@ def plan_path_to_box(gym, sim, device, env_ptr, root_state, robot_handle, box_ha
 
 def plan_path_to_franka(gym, sim, device, env_ptr, root_state, robot_handle, box_handle, all_obstacle_handles, max_samples=1024, custom_push_target=None,start_pos=None, force_axis_aligned=True):
     if start_pos is not None:
-        robot_pos = start_pos
+        robot_pos = tuple(np.asarray(start_pos).flatten()[:2])
     else:
         robot_idx = gym.get_actor_index(env_ptr, robot_handle, gymapi.DOMAIN_SIM)
-        robot_pos = root_state[robot_idx, 0:2].cpu().numpy()
+        robot_pos = tuple(root_state[robot_idx, 0:2].cpu().numpy())
     box_idx = gym.get_actor_index(env_ptr, box_handle, gymapi.DOMAIN_SIM)
-    box_pos = root_state[box_idx, 0:2].cpu().numpy()
+    box_pos = tuple(root_state[box_idx, 0:2].cpu().numpy())
     
     robot_size = 0.8
     default_box_length_size = 0.5
     default_box_width_size = 0.5
     
     if custom_push_target is not None:
-        push_target = custom_push_target
+        push_target = tuple(np.asarray(custom_push_target).flatten()[:2])
     else:
         push_target = box_pos
 

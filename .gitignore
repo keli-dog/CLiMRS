@@ -1,0 +1,27 @@
+﻿# secrets / local
+LLM/llm_utils/args.local.py
+LLM/llm_utils/args.py.local.bak
+.env
+
+# NVIDIA download (install separately)
+isaacgym/
+isaac-gym-preview*
+isaac-gym-preview-4/
+
+# caches / logs
+**/__pycache__/
+*.py[cod]
+log/
+experiment_results/
+wandb/
+.cache/
+
+# large / unrelated archives
+*.zip
+*.pdf
+*.bak
+*.bak_*
+
+# editor
+.vscode/
+.idea/

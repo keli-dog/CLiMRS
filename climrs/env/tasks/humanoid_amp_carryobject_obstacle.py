@@ -59,7 +59,7 @@ class LLMManager:
     def __init__(self, task_instance, enable_llm=True):
         self.task = task_instance
         self.enable_llm = enable_llm
-        self.llm_update = 5
+        self.llm_update = 50
         self.llm_mode_active = False
         self.arena_multi_agent = None
         if self.enable_llm:
@@ -78,7 +78,7 @@ class LLMManager:
         args.debug = False
         args.source = 'llm_module'
         args.lm_id = 'gpt-4o-mini'
-        args.max_tokens = 1000
+        args.max_tokens = 2048
         args.t = 0.7
         args.n = 1
         args.env = 'env0'
